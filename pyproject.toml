@@ -1,0 +1,17 @@
+[project]
+name = "ens"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+train = [
+    "datasets>=2.19",
+    "matplotlib>=3.8",
+    "pandas>=2.2",
+    "tokenizers>=0.19",
+    "torch>=2.2",
+    "tqdm>=4.66",
+]
