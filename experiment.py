@@ -76,11 +76,19 @@ def synthetic_data(vocab_size: int, seq_len: int, n: int = 128) -> tuple[TensorD
     return TensorDataset(x, y), TensorDataset(x[: n // 4], y[: n // 4])
 
 
-def run_one(cfg: Config, out_dir: Path, smoke: bool = False) -> dict[str, float | int | str]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_ds, val_ds = synthetic_data(
-        cfg.vocab_size, cfg.seq_len
-    ) if smoke else load_wikitext(cfg.vocab_size, cfg.seq_len)
+def run_one(
+    cfg: Config,
+    out_dir: Path,
+    datasets: tuple[TensorDataset, TensorDataset],
+) -> dict[str, float | int | str]:
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    train_ds, val_ds = datasets
     width = submodel_width(cfg.total_params, cfg.k)
     model = LatinEnsembleLM(
         vocab_size=cfg.vocab_size,
@@ -114,6 +122,10 @@ def run_one(cfg: Config, out_dir: Path, smoke: bool = False) -> dict[str, float 
         writer.writeheader()
         writer.writerows(rows)
     return {**asdict(cfg), "d_model": width, **metrics}
+
+
+def result_path(cfg: Config, out_dir: Path) -> Path:
+    return out_dir / f"result_k{cfg.k}_p{cfg.total_params}_{cfg.scheduler}.json"
 
 
 @torch.no_grad()
@@ -175,7 +187,22 @@ def main() -> None:
             for params in (1_000_000, 10_000_000)
             for scheduler in ("min", "max")
         ]
-    write_summary([run_one(cfg, args.out_dir, args.smoke) for cfg in configs], args.out_dir)
+    datasets = (
+        synthetic_data(configs[0].vocab_size, configs[0].seq_len)
+        if args.smoke
+        else load_wikitext(configs[0].vocab_size, configs[0].seq_len)
+    )
+    results = []
+    for cfg in configs:
+        path = result_path(cfg, args.out_dir)
+        if path.exists():
+            results.append(json.loads(path.read_text()))
+            continue
+        result = run_one(cfg, args.out_dir, datasets)
+        path.write_text(json.dumps(result, indent=2))
+        results.append(result)
+        write_summary(results, args.out_dir)
+    write_summary(results, args.out_dir)
 
 
 if __name__ == "__main__":
