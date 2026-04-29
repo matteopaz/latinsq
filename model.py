@@ -16,26 +16,73 @@ def submodel_width(total_params: int, k: int, heads: int = 2, ff_mult: int = 4) 
     return d_model
 
 
-class SubModel(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, dropout: float):
+class ParallelSubModels(nn.Module):
+    def __init__(self, k: int, d_model: int, n_heads: int, dropout: float):
         super().__init__()
-        self.ln1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(
-            d_model, n_heads, dropout=dropout, batch_first=True
-        )
-        self.ln2 = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, 4 * d_model),
-            nn.GELU(),
-            nn.Linear(4 * d_model, d_model),
-            nn.Dropout(dropout),
-        )
+        if d_model % n_heads:
+            raise ValueError("d_model must be divisible by n_heads")
+        self.k = k
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+        self.dropout = dropout
+
+        self.ln1_weight = nn.Parameter(torch.ones(k, d_model))
+        self.ln1_bias = nn.Parameter(torch.zeros(k, d_model))
+        self.qkv_weight = nn.Parameter(torch.empty(k, 3 * d_model, d_model))
+        self.qkv_bias = nn.Parameter(torch.zeros(k, 3 * d_model))
+        self.out_weight = nn.Parameter(torch.empty(k, d_model, d_model))
+        self.out_bias = nn.Parameter(torch.zeros(k, d_model))
+
+        self.ln2_weight = nn.Parameter(torch.ones(k, d_model))
+        self.ln2_bias = nn.Parameter(torch.zeros(k, d_model))
+        self.fc1_weight = nn.Parameter(torch.empty(k, 4 * d_model, d_model))
+        self.fc1_bias = nn.Parameter(torch.zeros(k, 4 * d_model))
+        self.fc2_weight = nn.Parameter(torch.empty(k, d_model, 4 * d_model))
+        self.fc2_bias = nn.Parameter(torch.zeros(k, d_model))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for weight in (
+            self.qkv_weight,
+            self.out_weight,
+            self.fc1_weight,
+            self.fc2_weight,
+        ):
+            for sub_weight in weight:
+                nn.init.xavier_uniform_(sub_weight)
+
+    def _layer_norm(self, x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+        y = F.layer_norm(x, (self.d_model,))
+        return y * weight[None, :, None, :] + bias[None, :, None, :]
+
+    def _linear(self, x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+        return torch.einsum("bktd,kod->bkto", x, weight) + bias[None, :, None, :]
 
     def forward(self, x: Tensor, causal_mask: Tensor) -> Tensor:
-        y = self.ln1(x)
-        y, _ = self.attn(y, y, y, attn_mask=causal_mask, need_weights=False)
-        x = x + y
-        return x + self.mlp(self.ln2(x))
+        batch, k, seq_len, _ = x.shape
+        if k != self.k:
+            raise ValueError(f"expected {self.k} simultaneous paths, got {k}")
+
+        y = self._layer_norm(x, self.ln1_weight, self.ln1_bias)
+        qkv = self._linear(y, self.qkv_weight, self.qkv_bias)
+        q, key, value = qkv.chunk(3, dim=-1)
+        q = q.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
+        key = key.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
+        value = value.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
+
+        scores = torch.matmul(q, key.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        scores = scores.masked_fill(causal_mask[None, None, None, :, :], float("-inf"))
+        attn = scores.softmax(dim=-1)
+        attn = F.dropout(attn, p=self.dropout, training=self.training)
+        y = torch.matmul(attn, value).transpose(2, 3).reshape(batch, k, seq_len, self.d_model)
+        x = x + self._linear(y, self.out_weight, self.out_bias)
+
+        y = self._layer_norm(x, self.ln2_weight, self.ln2_bias)
+        y = F.gelu(self._linear(y, self.fc1_weight, self.fc1_bias))
+        y = self._linear(y, self.fc2_weight, self.fc2_bias)
+        y = F.dropout(y, p=self.dropout, training=self.training)
+        return x + y
 
 
 class LatinEnsembleLM(nn.Module):
@@ -49,34 +96,32 @@ class LatinEnsembleLM(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.schedule = schedule
         self.k = len(schedule)
         self.d_model = d_model
         self.token_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
-        self.blocks = nn.ModuleList(
-            [SubModel(d_model, n_heads, dropout) for _ in range(self.k)]
-        )
+        schedule_tensor = torch.tensor(schedule, dtype=torch.long)
+        self.register_buffer("schedule", schedule_tensor)
+        self.register_buffer("inverse_schedule", torch.argsort(schedule_tensor, dim=1))
+        self.blocks = ParallelSubModels(self.k, d_model, n_heads, dropout)
         self.final_ln = nn.LayerNorm(d_model)
 
     def forward(self, input_ids: Tensor) -> Tensor:
         batch, seq_len = input_ids.shape
         pos = torch.arange(seq_len, device=input_ids.device)
         x = self.token_emb(input_ids) + self.pos_emb(pos)[None, :, :]
-        paths = x[:, None, :, :].expand(batch, self.k, seq_len, self.d_model)
+        paths = x[:, None, :, :].expand(batch, self.k, seq_len, self.d_model).clone()
         causal_mask = torch.triu(
             torch.ones(seq_len, seq_len, device=input_ids.device, dtype=torch.bool),
             diagonal=1,
         )
 
-        outputs = []
-        for col in range(self.k):
-            y = paths[:, col]
-            for row in range(self.k):
-                y = self.blocks[self.schedule[row][col]](y, causal_mask)
-            outputs.append(self.final_ln(y))
+        for row in self.inverse_schedule:
+            by_model = paths.index_select(1, row)
+            by_model = self.blocks(by_model, causal_mask)
+            paths = torch.empty_like(paths).index_copy(1, row, by_model)
 
-        hidden = torch.stack(outputs, dim=1)
+        hidden = self.final_ln(paths)
         return F.linear(hidden, self.token_emb.weight)
 
 
