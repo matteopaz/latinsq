@@ -57,9 +57,12 @@ class ParallelSubModels(nn.Module):
         return y * weight[None, :, None, :] + bias[None, :, None, :]
 
     def _linear(self, x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
-        return torch.einsum("bktd,kod->bkto", x, weight) + bias[None, :, None, :]
+        x = x.transpose(0, 1)
+        y = torch.bmm(x.flatten(1, 2), weight.transpose(1, 2))
+        y = y.view(self.k, -1, x.shape[2], weight.shape[1]).transpose(0, 1)
+        return y + bias[None, :, None, :]
 
-    def forward(self, x: Tensor, causal_mask: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         batch, k, seq_len, _ = x.shape
         if k != self.k:
             raise ValueError(f"expected {self.k} simultaneous paths, got {k}")
@@ -67,15 +70,17 @@ class ParallelSubModels(nn.Module):
         y = self._layer_norm(x, self.ln1_weight, self.ln1_bias)
         qkv = self._linear(y, self.qkv_weight, self.qkv_bias)
         q, key, value = qkv.chunk(3, dim=-1)
-        q = q.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
-        key = key.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
-        value = value.view(batch, k, seq_len, self.n_heads, self.head_dim).transpose(2, 3)
-
-        scores = torch.matmul(q, key.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        scores = scores.masked_fill(causal_mask[None, None, None, :, :], float("-inf"))
-        attn = scores.softmax(dim=-1)
-        attn = F.dropout(attn, p=self.dropout, training=self.training)
-        y = torch.matmul(attn, value).transpose(2, 3).reshape(batch, k, seq_len, self.d_model)
+        q = q.reshape(batch * k, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        key = key.reshape(batch * k, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        value = value.reshape(batch * k, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        y = F.scaled_dot_product_attention(
+            q,
+            key,
+            value,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=True,
+        )
+        y = y.transpose(1, 2).reshape(batch, k, seq_len, self.d_model)
         x = x + self._linear(y, self.out_weight, self.out_bias)
 
         y = self._layer_norm(x, self.ln2_weight, self.ln2_bias)
@@ -111,14 +116,9 @@ class LatinEnsembleLM(nn.Module):
         pos = torch.arange(seq_len, device=input_ids.device)
         x = self.token_emb(input_ids) + self.pos_emb(pos)[None, :, :]
         paths = x[:, None, :, :].expand(batch, self.k, seq_len, self.d_model).clone()
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, device=input_ids.device, dtype=torch.bool),
-            diagonal=1,
-        )
-
         for row in self.inverse_schedule:
             by_model = paths.index_select(1, row)
-            by_model = self.blocks(by_model, causal_mask)
+            by_model = self.blocks(by_model)
             paths = torch.empty_like(paths).index_copy(1, row, by_model)
 
         hidden = self.final_ln(paths)
@@ -126,6 +126,7 @@ class LatinEnsembleLM(nn.Module):
 
 
 def ensemble_loss(logits: Tensor, labels: Tensor) -> Tensor:
+    logits = logits.float()
     probs = logits.softmax(dim=-1).mean(dim=1).clamp_min(1e-12)
     return F.nll_loss(probs.log().flatten(0, 1), labels.flatten())
 

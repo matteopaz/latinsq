@@ -27,6 +27,8 @@ class Config:
     vocab_size: int = 32_000
     max_train_batches: int | None = None
     max_eval_batches: int | None = None
+    compile: bool = False
+    num_workers: int = 0
 
 
 def schedule(name: str, k: int) -> list[list[int]]:
@@ -37,12 +39,22 @@ def schedule(name: str, k: int) -> list[list[int]]:
     raise ValueError(f"unknown scheduler: {name}")
 
 
-def load_wikitext(vocab_size: int, seq_len: int) -> tuple[TensorDataset, TensorDataset]:
+def load_wikitext(
+    vocab_size: int, seq_len: int, cache_dir: Path = Path("data/cache")
+) -> tuple[TensorDataset, TensorDataset]:
     from datasets import load_dataset
     from tokenizers import Tokenizer
     from tokenizers.models import BPE
     from tokenizers.pre_tokenizers import ByteLevel
     from tokenizers.trainers import BpeTrainer
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tensor_cache = cache_dir / f"wikitext103_bpe{vocab_size}_seq{seq_len}.pt"
+    if tensor_cache.exists():
+        data = torch.load(tensor_cache, weights_only=True)
+        return TensorDataset(data["train_x"], data["train_y"]), TensorDataset(
+            data["val_x"], data["val_y"]
+        )
 
     ds = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
@@ -66,10 +78,23 @@ def load_wikitext(vocab_size: int, seq_len: int) -> tuple[TensorDataset, TensorD
         y = torch.tensor(ids[1 : usable + 1], dtype=torch.long).view(-1, seq_len)
         return TensorDataset(x, y)
 
-    return encode("train"), encode("validation")
+    train = encode("train")
+    val = encode("validation")
+    torch.save(
+        {
+            "train_x": train.tensors[0],
+            "train_y": train.tensors[1],
+            "val_x": val.tensors[0],
+            "val_y": val.tensors[1],
+        },
+        tensor_cache,
+    )
+    return train, val
 
 
-def synthetic_data(vocab_size: int, seq_len: int, n: int = 128) -> tuple[TensorDataset, TensorDataset]:
+def synthetic_data(
+    vocab_size: int, seq_len: int, n: int = 128
+) -> tuple[TensorDataset, TensorDataset]:
     gen = torch.Generator().manual_seed(0)
     x = torch.randint(0, vocab_size, (n, seq_len), generator=gen)
     y = torch.roll(x, shifts=-1, dims=1)
@@ -96,20 +121,44 @@ def run_one(
         d_model=width,
         max_seq_len=cfg.seq_len,
     ).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=cfg.batch_size)
+    if cfg.compile:
+        model = torch.compile(model)
+    opt_kwargs = {}
+    if device.type == "cuda":
+        opt_kwargs["fused"] = True
+    opt = torch.optim.AdamW(
+        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, **opt_kwargs
+    )
+    pin_memory = device.type == "cuda"
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        num_workers=cfg.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=cfg.num_workers > 0,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=cfg.batch_size,
+        num_workers=cfg.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=cfg.num_workers > 0,
+    )
     curve_path = out_dir / f"curve_k{cfg.k}_p{cfg.total_params}_{cfg.scheduler}.csv"
 
     rows = []
     for epoch in range(cfg.epochs):
         model.train()
-        iterator = tqdm(train_loader, desc=f"k={cfg.k} p={cfg.total_params} {cfg.scheduler} e={epoch}")
+        desc = f"k={cfg.k} p={cfg.total_params} {cfg.scheduler} e={epoch}"
+        iterator = tqdm(train_loader, desc=desc)
         for step, (x, y) in enumerate(iterator):
             if cfg.max_train_batches is not None and step >= cfg.max_train_batches:
                 break
             opt.zero_grad(set_to_none=True)
-            loss = ensemble_loss(model(x.to(device)), y.to(device))
+            x = x.to(device, non_blocking=pin_memory)
+            y = y.to(device, non_blocking=pin_memory)
+            loss = ensemble_loss(model(x), y)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
@@ -129,14 +178,22 @@ def result_path(cfg: Config, out_dir: Path) -> Path:
 
 
 @torch.no_grad()
-def evaluate(model: LatinEnsembleLM, loader: DataLoader, device: torch.device, max_batches: int | None) -> dict[str, float]:
+def evaluate(
+    model: LatinEnsembleLM,
+    loader: DataLoader,
+    device: torch.device,
+    max_batches: int | None,
+) -> dict[str, float]:
     model.eval()
     totals: dict[str, float] = {}
     n = 0
     for i, (x, y) in enumerate(loader):
         if max_batches is not None and i >= max_batches:
             break
-        metrics = ensemble_metrics(model(x.to(device)), y.to(device))
+        logits = model(x.to(device, non_blocking=device.type == "cuda"))
+        metrics = ensemble_metrics(
+            logits, y.to(device, non_blocking=device.type == "cuda")
+        )
         for key, value in metrics.items():
             totals[key] = totals.get(key, 0.0) + value
         n += 1
@@ -166,6 +223,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", type=Path, default=Path("runs"))
     parser.add_argument("--smoke", action="store_true", help="use synthetic data and one tiny run")
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--seq-len", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--max-train-batches", type=int)
+    parser.add_argument("--max-eval-batches", type=int)
+    parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--num-workers", type=int, default=0)
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,13 +240,28 @@ def main() -> None:
                 total_params=20_000,
                 scheduler="min",
                 epochs=1,
+                seq_len=min(args.seq_len, 128),
+                batch_size=min(args.batch_size, 8),
                 max_train_batches=1,
                 max_eval_batches=1,
+                compile=args.compile,
+                num_workers=args.num_workers,
             )
         ]
     else:
         configs = [
-            Config(k=k, total_params=params, scheduler=scheduler)
+            Config(
+                k=k,
+                total_params=params,
+                scheduler=scheduler,
+                epochs=args.epochs,
+                seq_len=args.seq_len,
+                batch_size=args.batch_size,
+                max_train_batches=args.max_train_batches,
+                max_eval_batches=args.max_eval_batches,
+                compile=args.compile,
+                num_workers=args.num_workers,
+            )
             for k in (16, 64, 128)
             for params in (1_000_000, 10_000_000)
             for scheduler in ("min", "max")

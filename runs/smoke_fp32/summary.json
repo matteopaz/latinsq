@@ -1,0 +1,26 @@
+[
+  {
+    "k": 2,
+    "total_params": 20000,
+    "scheduler": "min",
+    "epochs": 1,
+    "seq_len": 128,
+    "batch_size": 8,
+    "lr": 0.0003,
+    "weight_decay": 0.1,
+    "vocab_size": 32000,
+    "max_train_batches": 1,
+    "max_eval_batches": 1,
+    "compile": false,
+    "num_workers": 0,
+    "d_model": 28,
+    "ensemble_loss": 22.346752166748047,
+    "avg_individual_loss": 23.13532257080078,
+    "ensemble_gain": 0.7885704040527344,
+    "member_certainty_mean": 0.4636184871196747,
+    "member_certainty_min": 0.4589202404022217,
+    "member_certainty_max": 0.4683167338371277,
+    "member_certainty_std": 0.004698246717453003,
+    "prediction_dissimilarity_kl": 0.11057447642087936
+  }
+]
