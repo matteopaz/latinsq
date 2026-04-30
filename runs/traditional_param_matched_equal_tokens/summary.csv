@@ -1,0 +1,7 @@
+target_params,epochs,seq_len,batch_size,lr,weight_decay,vocab_size,n_layers,n_heads,max_train_batches,max_eval_batches,grad_accum_steps,compile,num_workers,model_type,d_model,actual_trainable_params,effective_train_batch_size,micro_train_batch_size,effective_eval_batch_size,train_sequences_seen,train_tokens_seen,eval_sequences_seen,eval_tokens_seen,validation_loss,certainty_mean
+1695792,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,50,1667800,12,12,12,3072,393216,1888,241664,14.364551061316382,0.05902000707633133
+2181960,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,64,2156288,12,12,12,3072,393216,1888,241664,14.577939775925648,0.05636290243909329
+3323664,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,96,3308160,12,12,12,3072,393216,1888,241664,14.447371633746956,0.07117958852573286
+12533920,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,314,12463288,12,12,12,3072,393216,1888,241664,14.78529037403155,0.09824520637151561
+13738596,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,340,13707440,12,12,12,3072,393216,1888,241664,14.539259168166149,0.13025765776445594
+17353992,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,412,17322128,12,12,12,3072,393216,1888,241664,14.745344017125383,0.12459606828191612

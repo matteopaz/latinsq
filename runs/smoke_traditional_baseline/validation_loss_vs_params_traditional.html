@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Traditional LM Validation Loss vs Params</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #plot { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <script>
+    const traces = [{"type": "scatter", "mode": "lines+markers", "name": "traditional LM", "x": [1000000], "y": [24.28240203857422]}];
+    const layout = {"title": "Traditional LM Validation Loss vs Params", "xaxis": {"title": "Target trainable params", "type": "log"}, "yaxis": {"title": "Final held-out validation loss"}, "hovermode": "x unified"};
+    Plotly.newPlot("plot", traces, layout, {responsive: true});
+  </script>
+</body>
+</html>

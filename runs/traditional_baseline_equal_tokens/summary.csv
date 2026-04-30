@@ -1,0 +1,3 @@
+target_params,epochs,seq_len,batch_size,lr,weight_decay,vocab_size,n_layers,n_heads,max_train_batches,max_eval_batches,grad_accum_steps,compile,num_workers,model_type,d_model,actual_trainable_params,effective_train_batch_size,micro_train_batch_size,effective_eval_batch_size,train_sequences_seen,train_tokens_seen,eval_sequences_seen,eval_tokens_seen,validation_loss,certainty_mean
+1000000,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,30,986280,12,12,12,3072,393216,1888,241664,14.003551410723336,0.04844528233891801
+10000000,2,128,12,0.0003,0.1,32000,2,2,128,,1,False,2,traditional_transformer_lm,260,9982960,12,12,12,3072,393216,1888,241664,14.449873562100567,0.10440718184543561

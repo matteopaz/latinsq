@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training Curves</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #plot { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <script>
+    const traces = [{"type": "scatter", "mode": "lines", "name": "k128 p10000000 max", "x": [0, 1], "y": [21.246511300404865, 18.06941302617391]}, {"type": "scatter", "mode": "lines", "name": "k128 p10000000 min", "x": [0, 1], "y": [22.80042298634847, 22.10328467686971]}, {"type": "scatter", "mode": "lines", "name": "k128 p1000000 max", "x": [0, 1], "y": [15.092967669169107, 14.442586342493692]}, {"type": "scatter", "mode": "lines", "name": "k128 p1000000 min", "x": [0, 1], "y": [14.75036907196045, 14.606010357538858]}, {"type": "scatter", "mode": "lines", "name": "k16 p10000000 max", "x": [0, 1], "y": [64.02285544077556, 48.49636745452881]}, {"type": "scatter", "mode": "lines", "name": "k16 p10000000 min", "x": [0, 1], "y": [67.36865933736165, 51.10309886932373]}, {"type": "scatter", "mode": "lines", "name": "k16 p1000000 max", "x": [0, 1], "y": [29.00145149230957, 27.79300594329834]}, {"type": "scatter", "mode": "lines", "name": "k16 p1000000 min", "x": [0, 1], "y": [30.553175767262776, 29.257255395253495]}, {"type": "scatter", "mode": "lines", "name": "k64 p10000000 max", "x": [0, 1], "y": [27.38176727294922, 23.000731627146404]}, {"type": "scatter", "mode": "lines", "name": "k64 p10000000 min", "x": [0, 1], "y": [29.505370140075684, 26.422293345133465]}, {"type": "scatter", "mode": "lines", "name": "k64 p1000000 max", "x": [0, 1], "y": [17.551344235738117, 16.96618366241455]}, {"type": "scatter", "mode": "lines", "name": "k64 p1000000 min", "x": [0, 1], "y": [18.69297297795613, 17.18999656041463]}];
+    const layout = {"title": "Training Curves", "xaxis": {"title": "Optimizer update"}, "yaxis": {"title": "Training loss"}, "hovermode": "x unified"};
+    Plotly.newPlot("plot", traces, layout, {responsive: true});
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training Curves</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #plot { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <script>
+    const traces = [{"type": "scatter", "mode": "lines", "name": "k16 p10000000 max", "x": [0, 1], "y": [64.68956756591797, 49.234405517578125]}, {"type": "scatter", "mode": "lines", "name": "k16 p10000000 min", "x": [0, 1], "y": [68.10581970214844, 51.798095703125]}, {"type": "scatter", "mode": "lines", "name": "k16 p1000000 max", "x": [0, 1], "y": [29.45724868774414, 28.540233612060547]}, {"type": "scatter", "mode": "lines", "name": "k16 p1000000 min", "x": [0, 1], "y": [30.50465965270996, 29.107505798339844]}, {"type": "scatter", "mode": "lines", "name": "k64 p1000000 max", "x": [0, 1], "y": [18.105003356933597, 17.12601089477539]}, {"type": "scatter", "mode": "lines", "name": "k64 p1000000 min", "x": [0, 1], "y": [19.61400413513184, 17.881345748901367]}];
+    const layout = {"title": "Training Curves", "xaxis": {"title": "Optimizer update"}, "yaxis": {"title": "Training loss"}, "hovermode": "x unified"};
+    Plotly.newPlot("plot", traces, layout, {responsive: true});
+  </script>
+</body>
+</html>

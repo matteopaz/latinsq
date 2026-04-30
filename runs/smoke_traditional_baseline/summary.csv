@@ -1,0 +1,2 @@
+target_params,epochs,seq_len,batch_size,lr,weight_decay,vocab_size,n_layers,n_heads,max_train_batches,max_eval_batches,grad_accum_steps,compile,num_workers,model_type,d_model,actual_trainable_params,effective_train_batch_size,micro_train_batch_size,effective_eval_batch_size,train_sequences_seen,train_tokens_seen,eval_sequences_seen,eval_tokens_seen,validation_loss,certainty_mean
+1000000,1,128,8,0.0003,0.1,32000,2,2,1,1,1,False,0,traditional_transformer_lm,30,986280,8,8,8,8,1024,8,1024,24.28240203857422,0.5461832284927368
