@@ -39,6 +39,7 @@ class Config:
     num_workers: int = 0
     auto_batch_by_k: bool = False
     active_column_fraction: float = 0.25
+    active_row_fraction: float = 1.0
     grad_accum_steps: int = 1
 
 
@@ -132,6 +133,7 @@ def run_one(
         d_model=width,
         max_seq_len=cfg.seq_len,
         active_column_fraction=cfg.active_column_fraction,
+        active_row_fraction=cfg.active_row_fraction,
     ).to(device)
     if cfg.compile:
         model = torch.compile(model)
@@ -206,6 +208,7 @@ def run_one(
 
     metrics = evaluate(model, val_loader, device, cfg.max_eval_batches)
     active_column_count = model.active_column_count()
+    active_row_count = model.active_row_count()
     del model
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -219,7 +222,9 @@ def run_one(
         "micro_train_batch_size": micro_train_batch_size,
         "effective_eval_batch_size": eval_batch_size,
         "active_column_fraction": cfg.active_column_fraction,
+        "active_row_fraction": cfg.active_row_fraction,
         "active_column_count": active_column_count,
+        "active_row_count": active_row_count,
         "train_sequences_seen": cfg.epochs
         * (cfg.max_train_batches or len(train_loader))
         * train_batch_size,
@@ -444,7 +449,9 @@ def write_report(results: list[dict[str, Any]], out_dir: Path) -> None:
         "grad_accum_steps",
         "effective_eval_batch_size",
         "active_column_fraction",
+        "active_row_fraction",
         "active_column_count",
+        "active_row_count",
         "train_sequences_seen",
         "train_tokens_seen",
         "eval_sequences_seen",
@@ -453,6 +460,8 @@ def write_report(results: list[dict[str, Any]], out_dir: Path) -> None:
     scope_df = df[[col for col in scope_cols if col in df.columns]].copy()
     for col in scope_df.select_dtypes(include="number").columns:
         if col == "active_column_fraction":
+            scope_df[col] = scope_df[col].map(lambda value: f"{float(value):.2f}")
+        elif col == "active_row_fraction":
             scope_df[col] = scope_df[col].map(lambda value: f"{float(value):.2f}")
         else:
             scope_df[col] = scope_df[col].map(lambda value: f"{int(value)}")
@@ -628,6 +637,27 @@ def main() -> None:
         help="fraction of Latin-square columns active on each forward pass",
     )
     parser.add_argument(
+        "--active-row-fraction",
+        type=float,
+        default=1.0,
+        help="fraction of Latin-square rows active on each forward pass",
+    )
+    parser.add_argument(
+        "--ks",
+        type=str,
+        help="comma-separated K values to run; default is 16,64,128",
+    )
+    parser.add_argument(
+        "--total-params-list",
+        type=str,
+        help="comma-separated parameter budgets to run; default is 1000000,10000000",
+    )
+    parser.add_argument(
+        "--schedulers",
+        type=str,
+        help="comma-separated schedulers to run; default is min,max",
+    )
+    parser.add_argument(
         "--grad-accum-steps",
         type=int,
         default=1,
@@ -651,10 +681,18 @@ def main() -> None:
                 num_workers=args.num_workers,
                 auto_batch_by_k=args.auto_batch_by_k,
                 active_column_fraction=args.active_column_fraction,
+                active_row_fraction=args.active_row_fraction,
                 grad_accum_steps=args.grad_accum_steps,
             )
         ]
     else:
+        ks = [int(value) for value in args.ks.split(",")] if args.ks else [16, 64, 128]
+        total_params_list = (
+            [int(value) for value in args.total_params_list.split(",")]
+            if args.total_params_list
+            else [1_000_000, 10_000_000]
+        )
+        schedulers = args.schedulers.split(",") if args.schedulers else ["min", "max"]
         configs = [
             Config(
                 k=k,
@@ -669,11 +707,12 @@ def main() -> None:
                 num_workers=args.num_workers,
                 auto_batch_by_k=args.auto_batch_by_k,
                 active_column_fraction=args.active_column_fraction,
+                active_row_fraction=args.active_row_fraction,
                 grad_accum_steps=args.grad_accum_steps,
             )
-            for k in (16, 64, 128)
-            for params in (1_000_000, 10_000_000)
-            for scheduler in ("min", "max")
+            for k in ks
+            for params in total_params_list
+            for scheduler in schedulers
         ]
     datasets = (
         synthetic_data(configs[0].vocab_size, configs[0].seq_len)

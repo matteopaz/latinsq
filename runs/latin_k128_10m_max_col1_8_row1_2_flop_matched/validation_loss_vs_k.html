@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Validation Loss vs K</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #plot { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <script>
+    const traces = [{"type": "scatter", "mode": "lines+markers", "name": "10000000 max", "x": [128], "y": [7.321268724489816]}];
+    const layout = {"title": "Validation Loss vs K", "xaxis": {"title": "K"}, "yaxis": {"title": "Final held-out validation loss"}, "hovermode": "x unified"};
+    Plotly.newPlot("plot", traces, layout, {responsive: true});
+  </script>
+</body>
+</html>

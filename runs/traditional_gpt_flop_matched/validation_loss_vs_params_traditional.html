@@ -13,7 +13,7 @@
 <body>
   <div id="plot"></div>
   <script>
-    const traces = [{"type": "scatter", "mode": "lines+markers", "name": "traditional LM", "x": [2181960, 3323664], "y": [5.814967973322808, 6.7748025429399705]}];
+    const traces = [{"type": "scatter", "mode": "lines+markers", "name": "traditional LM", "x": [1695792, 2181960, 3323664, 12533920, 13738596, 17353992], "y": [5.468192040165769, 5.814967973322808, 6.7748025429399705, 4.821999171112157, 5.387008766584758, 6.533915317511257]}];
     const layout = {"title": "Traditional LM Validation Loss vs Params", "xaxis": {"title": "Target trainable params", "type": "log"}, "yaxis": {"title": "Final held-out validation loss"}, "hovermode": "x unified"};
     Plotly.newPlot("plot", traces, layout, {responsive: true});
   </script>

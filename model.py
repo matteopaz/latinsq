@@ -131,13 +131,17 @@ class LatinEnsembleLM(nn.Module):
         max_seq_len: int = 256,
         dropout: float = 0.0,
         active_column_fraction: float = 0.25,
+        active_row_fraction: float = 1.0,
     ):
         super().__init__()
         if not 0.0 < active_column_fraction <= 1.0:
             raise ValueError("active_column_fraction must be in (0, 1]")
+        if not 0.0 < active_row_fraction <= 1.0:
+            raise ValueError("active_row_fraction must be in (0, 1]")
         self.k = len(schedule)
         self.d_model = d_model
         self.active_column_fraction = active_column_fraction
+        self.active_row_fraction = active_row_fraction
         self.token_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
         schedule_tensor = torch.tensor(schedule, dtype=torch.long)
@@ -149,8 +153,17 @@ class LatinEnsembleLM(nn.Module):
     def active_column_count(self) -> int:
         return max(1, math.ceil(self.k * self.active_column_fraction))
 
+    def active_row_count(self) -> int:
+        return max(1, math.ceil(self.k * self.active_row_fraction))
+
     def _active_columns(self, device: torch.device) -> Tensor:
         active_count = self.active_column_count()
+        if active_count >= self.k:
+            return torch.arange(self.k, device=device)
+        return torch.randperm(self.k, device=device)[:active_count].sort().values
+
+    def _active_rows(self, device: torch.device) -> Tensor:
+        active_count = self.active_row_count()
         if active_count >= self.k:
             return torch.arange(self.k, device=device)
         return torch.randperm(self.k, device=device)[:active_count].sort().values
@@ -159,18 +172,22 @@ class LatinEnsembleLM(nn.Module):
         self,
         input_ids: Tensor,
         active_columns: Tensor | None = None,
+        active_rows: Tensor | None = None,
         return_active_columns: bool = False,
     ) -> Tensor | tuple[Tensor, Tensor]:
         batch, seq_len = input_ids.shape
         if active_columns is None:
             active_columns = self._active_columns(input_ids.device)
+        if active_rows is None:
+            active_rows = self._active_rows(input_ids.device)
         active_columns = active_columns.to(device=input_ids.device, dtype=torch.long)
+        active_rows = active_rows.to(device=input_ids.device, dtype=torch.long)
         pos = torch.arange(seq_len, device=input_ids.device)
         x = self.token_emb(input_ids) + self.pos_emb(pos)[None, :, :]
         paths = x[:, None, :, :].expand(
             batch, active_columns.numel(), seq_len, self.d_model
         ).clone()
-        for row in self.schedule:
+        for row in self.schedule.index_select(0, active_rows):
             paths = self.blocks(paths, model_order=row.index_select(0, active_columns))
 
         hidden = self.final_ln(paths)
